@@ -51,21 +51,18 @@ use rustls::{
 };
 #[cfg(feature = "rustls-base")]
 use rustls_pki_types::{ServerName, UnixTime};
-use std::{
-    fmt,
-    io::{BufRead, BufReader},
-};
+use std::fmt;
 
 /// Represents a server X509 certificate.
 #[derive(Clone)]
 pub struct Certificate {
     #[cfg(feature = "default-tls")]
     native: native_tls_crate::Certificate,
-    #[cfg(feature = "rustls-base")]
+    #[cfg(any(feature = "__rustls_crypto_ring", feature = "__rustls_crypto_aws_lc"))]
     original: Cert,
 }
 
-#[cfg(feature = "rustls-base")]
+#[cfg(any(feature = "__rustls_crypto_ring", feature = "__rustls_crypto_aws_lc"))]
 #[derive(Clone)]
 enum Cert {
     Der(Vec<u8>),
@@ -76,7 +73,11 @@ enum Cert {
 #[derive(Clone)]
 pub struct Identity {
     #[cfg_attr(
-        not(any(feature = "native-tls", feature = "rustls-base")),
+        not(any(
+            feature = "native-tls",
+            feature = "__rustls_crypto_ring",
+            feature = "__rustls_crypto_aws_lc"
+        )),
         allow(unused)
     )]
     inner: ClientCert,
@@ -132,11 +133,16 @@ impl Certificate {
     /// # Ok(())
     /// # }
     /// ```
+    #[cfg(any(
+        feature = "default-tls",
+        feature = "__rustls_crypto_ring",
+        feature = "__rustls_crypto_aws_lc"
+    ))]
     pub fn from_der(der: &[u8]) -> crate::Result<Certificate> {
         Ok(Certificate {
             #[cfg(feature = "default-tls")]
             native: native_tls_crate::Certificate::from_der(der).map_err(crate::error::builder)?,
-            #[cfg(feature = "rustls-base")]
+            #[cfg(any(feature = "__rustls_crypto_ring", feature = "__rustls_crypto_aws_lc"))]
             original: Cert::Der(der.to_owned()),
         })
     }
@@ -157,11 +163,16 @@ impl Certificate {
     /// # Ok(())
     /// # }
     /// ```
+    #[cfg(any(
+        feature = "default-tls",
+        feature = "__rustls_crypto_ring",
+        feature = "__rustls_crypto_aws_lc"
+    ))]
     pub fn from_pem(pem: &[u8]) -> crate::Result<Certificate> {
         Ok(Certificate {
             #[cfg(feature = "default-tls")]
             native: native_tls_crate::Certificate::from_pem(pem).map_err(crate::error::builder)?,
-            #[cfg(feature = "rustls-base")]
+            #[cfg(any(feature = "__rustls_crypto_ring", feature = "__rustls_crypto_aws_lc"))]
             original: Cert::Pem(pem.to_owned()),
         })
     }
@@ -183,8 +194,13 @@ impl Certificate {
     /// # Ok(())
     /// # }
     /// ```
+    #[cfg(any(
+        feature = "default-tls",
+        feature = "__rustls_crypto_ring",
+        feature = "__rustls_crypto_aws_lc"
+    ))]
     pub fn from_pem_bundle(pem_bundle: &[u8]) -> crate::Result<Vec<Certificate>> {
-        let mut reader = BufReader::new(pem_bundle);
+        let mut reader = std::io::BufReader::new(pem_bundle);
 
         Self::read_pem_certs(&mut reader)?
             .iter()
@@ -197,7 +213,7 @@ impl Certificate {
         tls.add_root_certificate(self.native);
     }
 
-    #[cfg(feature = "rustls-base")]
+    #[cfg(any(feature = "__rustls_crypto_ring", feature = "__rustls_crypto_aws_lc"))]
     pub(crate) fn add_to_rustls(
         self,
         root_cert_store: &mut rustls::RootCertStore,
@@ -221,7 +237,12 @@ impl Certificate {
         Ok(())
     }
 
-    fn read_pem_certs(reader: &mut impl BufRead) -> crate::Result<Vec<Vec<u8>>> {
+    #[cfg(any(
+        feature = "default-tls",
+        feature = "__rustls_crypto_ring",
+        feature = "__rustls_crypto_aws_lc"
+    ))]
+    fn read_pem_certs(reader: &mut impl std::io::BufRead) -> crate::Result<Vec<Vec<u8>>> {
         rustls_pemfile::certs(reader)
             .map(|result| match result {
                 Ok(cert) => Ok(cert.as_ref().to_vec()),
@@ -389,7 +410,7 @@ impl Identity {
         }
     }
 
-    #[cfg(feature = "rustls-base")]
+    #[cfg(any(feature = "__rustls_crypto_ring", feature = "__rustls_crypto_aws_lc"))]
     pub(crate) fn add_to_rustls(
         self,
         config_builder: rustls::ConfigBuilder<
@@ -457,7 +478,7 @@ impl Version {
         }
     }
 
-    #[cfg(feature = "rustls-base")]
+    #[cfg(any(feature = "__rustls_crypto_ring", feature = "__rustls_crypto_aws_lc"))]
     pub(crate) fn from_rustls(version: rustls::ProtocolVersion) -> Option<Self> {
         match version {
             rustls::ProtocolVersion::SSLv2 => None,
@@ -478,13 +499,13 @@ pub(crate) enum TlsBackend {
     Default,
     #[cfg(feature = "native-tls")]
     BuiltNativeTls(native_tls_crate::TlsConnector),
-    #[cfg(any(
-        feature = "__rustls_crypto_ring",
-        feature = "__rustls_crypto_aws_lc-rs"
-    ))]
+    #[cfg(any(feature = "__rustls_crypto_ring", feature = "__rustls_crypto_aws_lc"))]
     Rustls,
     #[cfg(feature = "rustls-base")]
     BuiltRustls(rustls::ClientConfig),
+    #[cfg(feature = "rustls-base")]
+    #[allow(unused)]
+    MissingRustls,
     #[cfg(any(feature = "native-tls", feature = "rustls-base"))]
     UnknownPreconfigured,
 }
@@ -496,10 +517,12 @@ impl fmt::Debug for TlsBackend {
             TlsBackend::Default => write!(f, "Default"),
             #[cfg(feature = "native-tls")]
             TlsBackend::BuiltNativeTls(_) => write!(f, "BuiltNativeTls"),
-            #[cfg(feature = "rustls-base")]
+            #[cfg(any(feature = "__rustls_crypto_ring", feature = "__rustls_crypto_aws_lc"))]
             TlsBackend::Rustls => write!(f, "Rustls"),
             #[cfg(feature = "rustls-base")]
             TlsBackend::BuiltRustls(_) => write!(f, "BuiltRustls"),
+            #[cfg(feature = "rustls-base")]
+            TlsBackend::MissingRustls => write!(f, "MissingRustls"),
             #[cfg(any(feature = "native-tls", feature = "rustls-base"))]
             TlsBackend::UnknownPreconfigured => write!(f, "UnknownPreconfigured"),
         }
@@ -513,12 +536,24 @@ impl Default for TlsBackend {
             TlsBackend::Default
         }
 
-        #[cfg(any(
-            all(feature = "rustls-base", not(feature = "default-tls")),
-            feature = "http3"
+        #[cfg(all(
+            any(feature = "__rustls_crypto_ring", feature = "__rustls_crypto_aws_lc"),
+            not(feature = "default-tls")
         ))]
         {
             TlsBackend::Rustls
+        }
+
+        #[cfg(any(
+            all(
+                not(any(feature = "__rustls_crypto_ring", feature = "__rustls_crypto_aws_lc")),
+                not(feature = "default-tls"),
+                feature = "rustls-base"
+            ),
+            feature = "http3"
+        ))]
+        {
+            TlsBackend::MissingRustls
         }
     }
 }

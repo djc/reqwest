@@ -498,11 +498,8 @@ impl ClientBuilder {
                         config.tls_info,
                     )
                 }
-                #[cfg(any(
-                    feature = "__rustls_crypto_ring",
-                    feature = "__rustls_crypto_aws_lc-rs"
-                ))]
-                TlsBackend::Rustls => {
+                #[cfg(any(feature = "__rustls_crypto_ring", feature = "__rustls_crypto_aws_lc"))]
+                TlsBackend::MissingRustls | TlsBackend::Rustls => {
                     use crate::tls::NoVerifier;
 
                     // Set root certificates.
@@ -573,7 +570,7 @@ impl ClientBuilder {
                     let provider = rustls::crypto::ring::default_provider();
 
                     #[cfg(all(
-                        feature = "__rustls_crypto_aws_lc-rs",
+                        feature = "__rustls_crypto_aws_lc",
                         not(feature = "__rustls_crypto_ring")
                     ))]
                     let provider = rustls::crypto::aws_lc_rs::default_provider();
@@ -652,6 +649,18 @@ impl ClientBuilder {
                         config.nodelay,
                         config.tls_info,
                     )
+                }
+                #[cfg(all(
+                    feature = "rustls-base",
+                    not(any(
+                        feature = "__rustls_crypto_ring",
+                        feature = "__rustls_crypto_aws_lc"
+                    ))
+                ))]
+                TlsBackend::MissingRustls => {
+                    return Err(crate::error::builder(
+                        "rustls-base is enabled but no rustls configuration has been provided, and the ring or aws-lc backends have not been enabled. Enable a backend or call `use_preconfigured_tls`",
+                    ));
                 }
                 #[cfg(any(feature = "native-tls", feature = "rustls-base",))]
                 TlsBackend::UnknownPreconfigured => {
@@ -1620,16 +1629,10 @@ impl ClientBuilder {
     /// # Optional
     ///
     /// This requires the optional `rustls-tls(-...)` feature to be enabled.
-    #[cfg(any(
-        feature = "__rustls_crypto_ring",
-        feature = "__rustls_crypto_aws_lc-rs"
-    ))]
+    #[cfg(any(feature = "__rustls_crypto_ring", feature = "__rustls_crypto_aws_lc"))]
     #[cfg_attr(
         docsrs,
-        doc(cfg(any(
-            feature = "__rustls_crypto_ring",
-            feature = "__rustls_crypto_aws_lc-rs"
-        )))
+        doc(cfg(any(feature = "__rustls_crypto_ring", feature = "__rustls_crypto_aws_lc")))
     )]
     pub fn use_rustls_tls(mut self) -> ClientBuilder {
         self.config.tls = TlsBackend::Rustls;
